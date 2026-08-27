@@ -77,8 +77,6 @@ IMPORTANT PRODUCT RULES:
 
 10. If the customer asks for an exact product name, return the exact Shopify product title.
 
-11. Always use the Shopify product URL supplied with the product.
-
 12. When recommending a product, NEVER display the raw long product URL by itself.
 
 13. Make the EXACT Shopify product name a clickable Markdown link using
