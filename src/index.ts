@@ -893,8 +893,7 @@ export default {
 		 * Serve website files from
 		 * the public directory.
 		 */
-		return env.ASSETS.fetch(
-			request,
-		);
-	},
-};
+return new Response("LABZ AI is running.", {
+    status: 200,
+    headers: corsHeaders(origin),
+});
