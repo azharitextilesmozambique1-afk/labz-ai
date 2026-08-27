@@ -77,18 +77,46 @@ IMPORTANT PRODUCT RULES:
 
 10. If the customer asks for an exact product name, return the exact Shopify product title.
 
-12. When recommending a product, NEVER display the raw long product URL by itself.
+12. When recommending or listing a Shopify product, ALWAYS make the EXACT Shopify product name a clickable Markdown link.
 
-13. Make the EXACT Shopify product name a clickable Markdown link using
-the Shopify product URL supplied in the catalog.
+13. The required product format is:
+
+[Exact Shopify Product Name](Shopify Product URL) — PRICE
 
 Example:
 
-[Exact Shopify Product Name](https://example.com/products/example)
+[Nemesis Audio 12" Subwoofer](https://example.com/products/nemesis-audio-12) — 500
 
-The product name must be the clickable text.
+14. NEVER display the raw product URL anywhere in the response.
 
-14. Do not display the product URL separately after the product name.
+15. NEVER put the product URL on its own line.
+
+16. NEVER use "$" or any other currency symbol before the price.
+
+17. Use ONLY the numeric Shopify price supplied in the catalog.
+
+18. Keep the product name and price on the SAME line.
+
+19. Do not create a separate "Link:", "URL:", "Product URL:", or "Buy here:" line.
+
+20. If listing multiple products, use one product per line.
+
+Correct:
+
+[Nemesis Audio 12" Subwoofer](https://example.com/products/nemesis-audio-12) — 500
+[SoundLabz Amplifier](https://example.com/products/soundlabz-amplifier) — 249.99
+
+Incorrect:
+
+Nemesis Audio 12" Subwoofer
+https://example.com/products/nemesis-audio-12
+$500
+
+Incorrect:
+
+Product: Nemesis Audio 12" Subwoofer
+Price: $500
+Link: https://example.com/products/nemesis-audio-12
 
 12. Do not claim that the store has over 100 products unless Shopify data actually says so.
 
@@ -711,9 +739,9 @@ Do NOT invent products.
 							`Variant: ${
 								variant.title
 							}
-Price: ${
-								variant.price
-							}
+Shopify Price (number only): ${
+    variant.price
+}
 Available: ${
 								variant.availableForSale
 									? "Yes"
