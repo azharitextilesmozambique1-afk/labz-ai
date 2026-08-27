@@ -553,3 +553,52 @@ Do not invent product availability or pricing.
 		);
 	}
 }
+export default {
+	async fetch(
+		request: Request,
+		env: Env,
+		ctx: ExecutionContext,
+	): Promise<Response> {
+		const origin = request.headers.get("Origin");
+
+		// Handle CORS preflight
+		if (request.method === "OPTIONS") {
+			return new Response(null, {
+				status: 204,
+				headers: corsHeaders(origin),
+			});
+		}
+
+		const url = new URL(request.url);
+
+		// AI chat endpoint
+		if (
+			url.pathname === "/api/chat" &&
+			request.method === "POST"
+		) {
+			return handleChatRequest(
+				request,
+				env,
+				origin,
+			);
+		}
+
+		// Simple health check
+		if (
+			url.pathname === "/api/health" &&
+			request.method === "GET"
+		) {
+			return jsonResponse(
+				{
+					ok: true,
+					service: "LABZ AI",
+				},
+				200,
+				origin,
+			);
+		}
+
+		// Serve files from the public/ directory
+		return env.ASSETS.fetch(request);
+	},
+};
