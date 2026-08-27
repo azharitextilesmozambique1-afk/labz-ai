@@ -893,7 +893,15 @@ export default {
 		 * Serve website files from
 		 * the public directory.
 		 */
-return new Response("LABZ AI is running.", {
-    status: 200,
-    headers: corsHeaders(origin),
-});
+     return new Response(
+            "LABZ AI is running.",
+            {
+                status: 200,
+                headers:
+                    corsHeaders(
+                        origin,
+                    ),
+            },
+        );
+    },
+};
