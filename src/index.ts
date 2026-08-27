@@ -75,7 +75,7 @@ Your goal is to help visitors have a useful, natural conversation and make infor
 
 // Change this to your actual Shopify domain when we connect it.
 // Keeping "*" temporarily makes initial testing easier.
-const ALLOWED_ORIGIN = "*";
+const ALLOWED_ORIGIN = "https://soundlabzaudio.myshopify.com";
 
 function corsHeaders(origin: string | null): Headers {
 	const allowedOrigin =
