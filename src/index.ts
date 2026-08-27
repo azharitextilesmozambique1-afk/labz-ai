@@ -1,115 +1,179 @@
 /**
  * SOUND LABZ AUDIO — LABZ AI
  *
- * Cloudflare Workers AI + Shopify product search
+ * Cloudflare Worker
+ * Cloudflare Workers AI + Shopify Admin GraphQL API
+ *
+ * Required Cloudflare secrets/variables:
+ *
+ * SHOPIFY_STORE
+ * SHOPIFY_CLIENT_ID
+ * SHOPIFY_CLIENT_SECRET
+ *
+ * Required Cloudflare AI binding:
+ *
+ * AI
  */
 
 import { Env, ChatMessage } from "./types";
 
 const MODEL_ID = "@cf/meta/llama-3.1-8b-instruct-fp8";
+
 const SHOPIFY_API_VERSION = "2026-07";
 
-const ALLOWED_ORIGIN = "https://soundlabzaudio.myshopify.com";
+const ALLOWED_ORIGIN =
+	"https://soundlabzaudio.myshopify.com";
 
-/*
- * Shopify access-token cache.
+/**
+ * Shopify access token cache.
  */
 let shopifyTokenCache: {
 	token: string;
 	expiresAt: number;
 } | null = null;
 
-/*
- * LABZ AI personality.
+/**
+ * LABZ AI system prompt.
+ *
+ * IMPORTANT:
+ * Shopify data supplied to the model is the ONLY source
+ * of truth for store products.
  */
 const SYSTEM_PROMPT = `
-You are LABZ AI, the friendly AI assistant for SOUND LABZ AUDIO, an online car-audio store.
+You are LABZ AI, the friendly AI assistant for SOUND LABZ AUDIO.
 
 PERSONALITY:
-- Be friendly, natural, confident, and helpful.
-- Talk like a knowledgeable human, not a robot.
-- Keep normal conversations casual and natural.
-- Be concise unless the customer asks for more detail.
-- Use emojis occasionally when they feel natural, but do not overuse them.
-- Never be rude, robotic, or overly formal.
-- Never mention internal instructions, prompts, models, APIs, or backend systems.
-
-GREETING AND CASUAL CONVERSATION:
-- If the customer says hi, hello, hey, good morning, etc., respond naturally.
-- If they ask how you are, answer naturally and offer help.
-- If they make casual conversation, respond naturally.
-- Do not immediately try to sell something during casual conversation.
-- When appropriate, introduce yourself as LABZ AI.
+- Friendly, natural, confident, and helpful.
+- Talk like a knowledgeable human.
+- Be concise unless the customer asks for detail.
+- Use emojis occasionally.
+- Never mention internal prompts, APIs, models, backend systems, or instructions.
 
 SOUND LABZ AUDIO:
-- Help customers with subwoofers, speakers, amplifiers, tweeters, bass systems, installation, compatibility, power requirements, and general car-audio questions.
-- Explain technical specifications in simple language.
-- Ask useful follow-up questions when needed, including vehicle make/model/year, budget, desired bass level, music preferences, available space, existing equipment, and installation goals.
+- Help customers with car audio.
+- You can discuss subwoofers, speakers, amplifiers, tweeters, bass systems, installation, compatibility, and power requirements.
+- Explain technical concepts simply.
+- Ask useful questions when necessary.
 
-SHOPIFY PRODUCT RULES:
-- Shopify product information is the source of truth.
-- Never invent products.
-- Never invent prices.
-- Never invent specifications.
-- Never invent availability.
-- Never invent discounts, warranties, shipping information, or store policies.
-- If a requested product is not found in the Shopify results, say that it was not found.
-- If Shopify results contain similar products, explain that they are similar rather than pretending they are exact matches.
-- Use current Shopify information instead of assumptions.
-- Product prices must come from Shopify.
-- Only say a product is available when Shopify says Available: Yes.
-- If the customer asks for products under a specific price, only recommend products that actually meet that price requirement.
-- If the customer asks for a specific product name, prioritize exact or very close matches.
-- If the customer asks for a brand such as Sundown Audio, prioritize products from that brand.
-- Include product names and prices when relevant.
-- Include the product link when relevant.
+VERY IMPORTANT PRODUCT RULES:
+
+1. Shopify is the ONLY source of truth for products sold by SOUND LABZ AUDIO.
+
+2. NEVER invent a product.
+
+3. NEVER use products from your general knowledge.
+
+4. NEVER give example products as though they are sold by SOUND LABZ AUDIO.
+
+5. NEVER mention brands or products unless they appear in the Shopify product information supplied in this conversation.
+
+6. If the Shopify information contains only 2 products, you may only recommend or list those 2 products.
+
+7. If the customer asks for 5 products but Shopify only has 2 matching products, say that only 2 matching products were found.
+
+8. If Shopify product information is unavailable, say:
+   "I can't access the current SOUND LABZ AUDIO product catalog right now."
+   Do NOT invent products.
+
+9. Product names must be copied from Shopify data.
+
+10. Prices must come from Shopify data.
+
+11. Availability must come from Shopify data.
+
+12. Product URLs must come from Shopify data.
+
+13. If a product is not present in Shopify data, you must not claim SOUND LABZ AUDIO sells it.
+
+14. For price requests such as:
+   - products under $100
+   - products below $50
+   - products between $50 and $100
+   - cheapest products
+   - products around $100
+
+   use ONLY the products supplied from Shopify.
+
+15. If Shopify data has already been filtered by the backend, trust that filtered result.
+
+CONVERSATION:
+- Answer the customer's actual question first.
+- Keep answers readable.
+- Do not repeat yourself.
+- Ask one or two useful questions when needed.
 
 SALES STYLE:
-- Be helpful rather than pushy.
-- Understand the customer's needs before recommending something.
+- Helpful, not pushy.
 - Explain why a recommendation makes sense.
-- Never pressure the customer to buy.
-- If the customer asks a general question, answer the question first.
-
-TECHNICAL ADVICE:
-- Explain car-audio concepts clearly.
-- Avoid unnecessary technical jargon.
-- Never confidently give information you are unsure about.
-- For potentially dangerous electrical or installation work, recommend professional installation.
-
-CONVERSATION STYLE:
-- Answer the customer's actual question first.
-- Keep responses readable.
-- Avoid unnecessary long paragraphs.
-- Do not repeat yourself.
-- Ask one or two useful questions when more information is needed.
-- Maintain context from the recent conversation.
+- Never pressure the customer.
 
 IMPORTANT:
 You are the customer-facing assistant for SOUND LABZ AUDIO.
-Your goal is to help visitors have a useful, natural conversation and make informed car-audio decisions.
+Your goal is to help visitors make informed car-audio decisions using accurate store information.
 `;
 
-/*
+/**
+ * Convert an environment object into the Shopify environment shape.
+ *
+ * This prevents the "envWithShopify is not defined" problem.
+ */
+function getShopifyEnv(env: Env) {
+	return env as Env & {
+		SHOPIFY_STORE: string;
+		SHOPIFY_CLIENT_ID: string;
+		SHOPIFY_CLIENT_SECRET: string;
+	};
+}
+
+/**
  * CORS headers.
  */
 function corsHeaders(origin: string | null): Headers {
-	const allowedOrigin =
-		origin === ALLOWED_ORIGIN
-			? origin
-			: ALLOWED_ORIGIN;
+	const headers = new Headers();
 
-	return new Headers({
-		"Access-Control-Allow-Origin": allowedOrigin,
-		"Access-Control-Allow-Methods":
-			"GET, POST, OPTIONS",
-		"Access-Control-Allow-Headers":
-			"Content-Type",
-		"Access-Control-Max-Age": "86400",
-	});
+	/**
+	 * Allow the Shopify storefront.
+	 *
+	 * During testing, same-origin requests from the Worker
+	 * also work.
+	 */
+	if (
+		origin === ALLOWED_ORIGIN ||
+		origin === null
+	) {
+		headers.set(
+			"Access-Control-Allow-Origin",
+			origin ?? ALLOWED_ORIGIN,
+		);
+	} else {
+		/**
+		 * For testing, return the configured storefront origin.
+		 */
+		headers.set(
+			"Access-Control-Allow-Origin",
+			ALLOWED_ORIGIN,
+		);
+	}
+
+	headers.set(
+		"Access-Control-Allow-Methods",
+		"GET, POST, OPTIONS",
+	);
+
+	headers.set(
+		"Access-Control-Allow-Headers",
+		"Content-Type",
+	);
+
+	headers.set(
+		"Access-Control-Max-Age",
+		"86400",
+	);
+
+	return headers;
 }
 
-/*
+/**
  * JSON response helper.
  */
 function jsonResponse(
@@ -133,54 +197,86 @@ function jsonResponse(
 	);
 }
 
-/*
- * Extract a maximum price from requests such as:
+/**
+ * Normalize the Shopify store hostname.
  *
- * under $100
- * below $100
- * less than $100
- * cheaper than $100
- * $100 or less
+ * Accepts:
+ *
+ * soundlabzaudio.myshopify.com
+ *
+ * https://soundlabzaudio.myshopify.com
+ *
+ * https://soundlabzaudio.myshopify.com/
  */
-function extractMaxPrice(
-	message: string,
-): number | null {
-	const patterns = [
-		/(?:under|below|less than|cheaper than|max(?:imum)?(?: price)?(?: of)?)\s*\$?\s*(\d+(?:\.\d{1,2})?)/i,
-
-		/\$?\s*(\d+(?:\.\d{1,2})?)\s*(?:or less|and under)/i,
-	];
-
-	for (const pattern of patterns) {
-		const match = message.match(pattern);
-
-		if (match && match[1]) {
-			const price = Number(match[1]);
-
-			if (Number.isFinite(price)) {
-				return price;
-			}
-		}
-	}
-
-	return null;
+function normalizeShopifyStore(store: string): string {
+	return store
+		.trim()
+		.replace(/^https?:\/\//i, "")
+		.replace(/\/+$/, "");
 }
 
-/*
+/**
+ * Validate Shopify environment variables.
+ */
+function validateShopifyEnvironment(env: Env): {
+	store: string;
+	clientId: string;
+	clientSecret: string;
+} {
+	const shopifyEnv = getShopifyEnv(env);
+
+	const store = normalizeShopifyStore(
+		shopifyEnv.SHOPIFY_STORE || "",
+	);
+
+	const clientId =
+		shopifyEnv.SHOPIFY_CLIENT_ID || "";
+
+	const clientSecret =
+		shopifyEnv.SHOPIFY_CLIENT_SECRET || "";
+
+	if (!store) {
+		throw new Error(
+			"SHOPIFY_STORE is missing.",
+		);
+	}
+
+	if (!clientId) {
+		throw new Error(
+			"SHOPIFY_CLIENT_ID is missing.",
+		);
+	}
+
+	if (!clientSecret) {
+		throw new Error(
+			"SHOPIFY_CLIENT_SECRET is missing.",
+		);
+	}
+
+	return {
+		store,
+		clientId,
+		clientSecret,
+	};
+}
+
+/**
  * Get Shopify Admin API access token.
+ *
+ * Uses Shopify's client credentials flow.
  */
 async function getShopifyAccessToken(
 	env: Env,
 ): Promise<string> {
-	const shopifyEnv = env as Env & {
-		SHOPIFY_STORE: string;
-		SHOPIFY_CLIENT_ID: string;
-		SHOPIFY_CLIENT_SECRET: string;
-	};
+	const {
+		store,
+		clientId,
+		clientSecret,
+	} = validateShopifyEnvironment(env);
 
 	const now = Date.now();
 
-	/*
+	/**
 	 * Reuse cached token when possible.
 	 */
 	if (
@@ -191,62 +287,89 @@ async function getShopifyAccessToken(
 		return shopifyTokenCache.token;
 	}
 
+	/**
+	 * Shopify token endpoint.
+	 *
+	 * IMPORTANT:
+	 * This uses the specific store hostname.
+	 */
+	const tokenUrl =
+		`https://${store}/admin/oauth/access_token`;
+
+	console.log(
+		"SHOPIFY AUTH: requesting token for",
+		store,
+	);
+
 	const response = await fetch(
-    `https://${envWithShopify.SHOPIFY_STORE}/admin/oauth/access_token`,
+		tokenUrl,
 		{
 			method: "POST",
-
 			headers: {
 				"Content-Type":
 					"application/x-www-form-urlencoded",
+				"Accept": "application/json",
 			},
-
 			body: new URLSearchParams({
-				client_id:
-					shopifyEnv.SHOPIFY_CLIENT_ID,
-
-				client_secret:
-					shopifyEnv.SHOPIFY_CLIENT_SECRET,
-
+				client_id: clientId,
+				client_secret: clientSecret,
 				grant_type:
 					"client_credentials",
 			}),
 		},
 	);
 
-	if (!response.ok) {
-		const errorText =
-			await response.text();
+	const responseText =
+		await response.text();
 
+	if (!response.ok) {
 		console.error(
-			"Shopify token error:",
+			"SHOPIFY TOKEN ERROR:",
 			response.status,
-			errorText,
+			responseText.substring(0, 2000),
 		);
 
 		throw new Error(
-			"Unable to authenticate with Shopify.",
+			`Shopify authentication failed with HTTP ${response.status}.`,
 		);
 	}
 
-	const data =
-		(await response.json()) as {
-			access_token?: string;
-			expires_in?: number;
-		};
+	let data: {
+		access_token?: string;
+		expires_in?: number;
+	};
+
+	try {
+		data = JSON.parse(responseText);
+	} catch {
+		console.error(
+			"SHOPIFY TOKEN RESPONSE WAS NOT JSON:",
+			responseText.substring(0, 2000),
+		);
+
+		throw new Error(
+			"Shopify returned an invalid authentication response.",
+		);
+	}
 
 	if (!data.access_token) {
+		console.error(
+			"SHOPIFY TOKEN RESPONSE DID NOT CONTAIN ACCESS TOKEN:",
+			data,
+		);
+
 		throw new Error(
 			"Shopify did not return an access token.",
 		);
 	}
 
 	const expiresIn =
-		data.expires_in ?? 86400;
+		typeof data.expires_in === "number"
+			? data.expires_in
+			: 86400;
 
 	shopifyTokenCache = {
 		token: data.access_token,
-
 		expiresAt:
 			now +
 			Math.max(
@@ -255,52 +378,67 @@ async function getShopifyAccessToken(
 			),
 	};
 
+	console.log(
+		"SHOPIFY AUTH: token received successfully",
+	);
+
 	return data.access_token;
 }
 
-/*
- * Search Shopify products.
+/**
+ * Product variant.
  */
-async function searchShopifyProducts(
-	customerQuery: string,
-	env: Env,
-	maxPrice: number | null,
-): Promise<string> {
-	const shopifyEnv = env as Env & {
-		SHOPIFY_STORE: string;
+type ShopifyVariant = {
+	id: string;
+	title: string;
+	price: string;
+	availableForSale: boolean;
+	sku: string | null;
+};
+
+/**
+ * Product.
+ */
+type ShopifyProduct = {
+	id: string;
+	title: string;
+	handle: string;
+	vendor: string | null;
+	description: string | null;
+	onlineStoreUrl: string | null;
+	featuredImage: {
+		url: string;
+	} | null;
+	variants: {
+		nodes: ShopifyVariant[];
 	};
+};
+
+/**
+ * Fetch Shopify products.
+ *
+ * We intentionally retrieve the catalog first and then perform
+ * filtering ourselves.
+ *
+ * This is important because a customer may ask:
+ *
+ * "Show me 5 products under $100"
+ *
+ * Shopify should not receive that entire sentence as a search query.
+ */
+async function fetchShopifyProducts(
+	env: Env,
+): Promise<ShopifyProduct[]> {
+	const {
+		store,
+	} = validateShopifyEnvironment(env);
 
 	const token =
 		await getShopifyAccessToken(env);
 
-	/*
-	 * Remove price language before sending
-	 * the search query to Shopify.
-	 *
-	 * Example:
-	 *
-	 * "show me subwoofers under $100"
-	 *
-	 * becomes:
-	 *
-	 * "show me subwoofers"
-	 */
-	const shopifySearchQuery =
-		customerQuery
-			.replace(
-				/(under|below|less than|cheaper than|max(?:imum)?(?: price)?(?: of)?)\s*\$?\s*\d+(?:\.\d{1,2})?/gi,
-				"",
-			)
-			.replace(
-				/\$?\s*\d+(?:\.\d{1,2})?\s*(or less|and under)/gi,
-				"",
-			)
-			.trim()
-			.substring(0, 200);
-
 	const graphqlQuery = `
-		query ProductSearch($query: String!) {
-			products(first: 20, query: $query) {
+		query GetProducts {
+			products(first: 250) {
 				nodes {
 					id
 					title
@@ -308,12 +446,10 @@ async function searchShopifyProducts(
 					vendor
 					description
 					onlineStoreUrl
-
 					featuredImage {
 						url
 					}
-
-					variants(first: 20) {
+					variants(first: 100) {
 						nodes {
 							id
 							title
@@ -327,224 +463,290 @@ async function searchShopifyProducts(
 		}
 	`;
 
+	const apiUrl =
+		`https://${store}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`;
+
+	console.log(
+		"SHOPIFY PRODUCTS: requesting catalog",
+	);
+
 	const response = await fetch(
-		`https://${shopifyEnv.SHOPIFY_STORE}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`,
+		apiUrl,
 		{
 			method: "POST",
-
 			headers: {
 				"Content-Type":
 					"application/json",
-
+				"Accept": "application/json",
 				"X-Shopify-Access-Token":
 					token,
 			},
-
 			body: JSON.stringify({
 				query: graphqlQuery,
-
-				variables: {
-					query:
-						shopifySearchQuery ||
-						customerQuery,
-				},
 			}),
 		},
 	);
 
-	if (!response.ok) {
-		const errorText =
-			await response.text();
+	const responseText =
+		await response.text();
 
+	if (!response.ok) {
 		console.error(
-			"Shopify product search error:",
+			"SHOPIFY GRAPHQL HTTP ERROR:",
 			response.status,
-			errorText,
+			responseText.substring(0, 3000),
 		);
 
 		throw new Error(
-			"Unable to search Shopify products.",
+			`Shopify product API returned HTTP ${response.status}.`,
 		);
 	}
 
-	const data =
-		(await response.json()) as {
-			data?: {
-				products?: {
-					nodes?: Array<{
-						id: string;
-						title: string;
-						handle: string;
-
-						vendor?: string | null;
-
-						description?:
-							| string
-							| null;
-
-						onlineStoreUrl?:
-							| string
-							| null;
-
-						featuredImage?: {
-							url: string;
-						} | null;
-
-						variants?: {
-							nodes?: Array<{
-								id: string;
-								title: string;
-								price: string;
-								availableForSale: boolean;
-								sku?: string | null;
-							}>;
-						};
-					}>;
-				};
+	let data: {
+		data?: {
+			products?: {
+				nodes?: ShopifyProduct[];
 			};
-
-			errors?: unknown[];
 		};
+		errors?: Array<{
+			message?: string;
+		}>;
+	};
 
-	if (data.errors) {
+	try {
+		data = JSON.parse(responseText);
+	} catch {
 		console.error(
-			"Shopify GraphQL errors:",
+			"SHOPIFY GRAPHQL RESPONSE WAS NOT JSON:",
+			responseText.substring(0, 3000),
+		);
+
+		throw new Error(
+			"Shopify returned an invalid product response.",
+		);
+	}
+
+	if (
+		data.errors &&
+		data.errors.length > 0
+	) {
+		console.error(
+			"SHOPIFY GRAPHQL ERRORS:",
 			data.errors,
 		);
 
 		throw new Error(
-			"Shopify returned a product search error.",
+			data.errors
+				.map(
+					(error) =>
+						error.message ??
+						"Unknown Shopify GraphQL error",
+				)
+				.join("; "),
 		);
 	}
 
-	let products =
+	const products =
 		data.data?.products?.nodes ?? [];
 
-	/*
-	 * Apply the price filter ourselves.
-	 *
-	 * This makes:
-	 *
-	 * "under $100"
-	 *
-	 * actually mean <= $100.
-	 */
-	if (maxPrice !== null) {
-		products = products
-			.map((product) => {
-				const variants =
-					product.variants?.nodes ?? [];
+	console.log(
+		"SHOPIFY PRODUCTS: received",
+		products.length,
+		"products",
+	);
 
-				const matchingVariants =
-					variants.filter(
-						(variant) => {
-							const price =
-								Number(
-									variant.price,
-								);
-
-							return (
-								Number.isFinite(
-									price,
-								) &&
-								price <=
-									maxPrice
-							);
-						},
-					);
-
-				return {
-					...product,
-
-					variants: {
-						nodes:
-							matchingVariants,
-					},
-				};
-			})
-			.filter(
-				(product) =>
-					(product.variants
-						?.nodes?.length ?? 0) >
-					0,
-			);
-	}
-
-	if (products.length === 0) {
-		if (maxPrice !== null) {
-			return (
-				`No matching Shopify products were found under $${maxPrice}.`
-			);
-		}
-
-		return "No matching Shopify products were found.";
-	}
-
-	/*
-	 * Convert Shopify products into clean context
-	 * for LABZ AI.
-	 */
-	return products
-		.map((product, index) => {
-			const variants =
-				product.variants?.nodes ?? [];
-
-			const variantText =
-				variants.length > 0
-					? variants
-							.map(
-								(
-									variant,
-								) =>
-									`- Variant: ${variant.title}; Price: ${variant.price}; Available: ${
-										variant.availableForSale
-											? "Yes"
-											: "No"
-									}${
-										variant.sku
-											? `; SKU: ${variant.sku}`
-											: ""
-									}`,
-							)
-							.join("\n")
-					: "No matching variants.";
-
-			const productUrl =
-				product.onlineStoreUrl ??
-				`https://${shopifyEnv.SHOPIFY_STORE}/products/${product.handle}`;
-
-			return `
-PRODUCT ${index + 1}
-
-Product name:
-${product.title}
-
-Brand / Vendor:
-${product.vendor ?? "Not specified"}
-
-Description:
-${
-	product.description
-		? product.description.substring(
-				0,
-				800,
-			)
-		: "Not provided"
+	return products;
 }
 
-Product URL:
-${productUrl}
+/**
+ * Safely convert a Shopify price string into a number.
+ */
+function priceToNumber(
+	price: string,
+): number | null {
+	const parsed = Number(price);
 
+	if (!Number.isFinite(parsed)) {
+		return null;
+	}
+
+	return parsed;
+}
+
+/**
+ * Create a clean product object for the AI.
+ */
+function productToText(
+	product: ShopifyProduct,
+	index: number,
+): string {
+	const variants =
+		product.variants?.nodes ?? [];
+
+	const variantText =
+		variants.length > 0
+			? variants
+					.map((variant) => {
+						return [
+							`Variant: ${variant.title}`,
+							`Price: ${variant.price}`,
+							`Available: ${
+								variant.availableForSale
+									? "Yes"
+									: "No"
+							}`,
+							variant.sku
+								? `SKU: ${variant.sku}`
+								: "",
+						]
+							.filter(Boolean)
+							.join("; ");
+					})
+					.join("\n")
+			: "No variants found.";
+
+	const productUrl =
+		product.onlineStoreUrl ??
+		`https://${normalizeShopifyStore(
+			validateShopifyEnvironment(
+				{} as Env,
+			).store,
+		)}/products/${product.handle}`;
+
+	return `
+PRODUCT ${index + 1}
+Name: ${product.title}
+Vendor: ${product.vendor ?? "Not specified"}
+Description: ${
+		product.description
+			? product.description
+					.replace(/\s+/g, " ")
+					.substring(0, 600)
+			: "Not provided"
+}
+URL: ${productUrl}
 Variants:
 ${variantText}
 `;
-		})
-		.join("\n");
 }
 
-/*
- * Determine whether the customer is asking
- * about products or store inventory.
+/**
+ * Build a product URL without requiring environment again.
+ */
+function productToTextWithStore(
+	product: ShopifyProduct,
+	index: number,
+	store: string,
+): string {
+	const variants =
+		product.variants?.nodes ?? [];
+
+	const variantText =
+		variants.length > 0
+			? variants
+					.map((variant) => {
+						return [
+							`Variant: ${variant.title}`,
+							`Price: ${variant.price}`,
+							`Available: ${
+								variant.availableForSale
+									? "Yes"
+									: "No"
+							}`,
+							variant.sku
+								? `SKU: ${variant.sku}`
+								: "",
+						]
+							.filter(Boolean)
+							.join("; ");
+					})
+					.join("\n")
+			: "No variants found.";
+
+	const productUrl =
+		product.onlineStoreUrl ??
+		`https://${store}/products/${product.handle}`;
+
+	return `
+PRODUCT ${index + 1}
+Name: ${product.title}
+Vendor: ${product.vendor ?? "Not specified"}
+Description: ${
+		product.description
+			? product.description
+					.replace(/\s+/g, " ")
+					.substring(0, 600)
+			: "Not provided"
+}
+URL: ${productUrl}
+Variants:
+${variantText}
+`;
+}
+
+/**
+ * Detect a price limit.
+ *
+ * Examples:
+ *
+ * under $100
+ * below $100
+ * less than $100
+ * under 100
+ */
+function extractMaximumPrice(
+	message: string,
+): number | null {
+	const patterns = [
+		/(?:under|below|less than|up to|max(?:imum)?(?: of)?|at most)\s*\$?\s*(\d+(?:\.\d+)?)/i,
+		/\$\s*(\d+(?:\.\d+)?)\s*(?:or less|and under|or below)/i,
+	];
+
+	for (const pattern of patterns) {
+		const match =
+			message.match(pattern);
+
+		if (match?.[1]) {
+			const value = Number(match[1]);
+
+			if (Number.isFinite(value)) {
+				return value;
+			}
+		}
+	}
+
+	return null;
+}
+
+/**
+ * Detect requested number of products.
+ *
+ * "show me 5 products"
+ */
+function extractRequestedCount(
+	message: string,
+): number {
+	const match =
+		message.match(
+			/\b(\d+)\s+(?:products?|items?)\b/i,
+		);
+
+	if (match?.[1]) {
+		const value = Number(match[1]);
+
+		if (
+			Number.isFinite(value) &&
+			value > 0
+		) {
+			return Math.min(value, 20);
+		}
+	}
+
+	return 8;
+}
+
+/**
+ * Detect whether customer is asking for product information.
  */
 function shouldSearchProducts(
 	message: string,
@@ -552,15 +754,14 @@ function shouldSearchProducts(
 	const text =
 		message.toLowerCase();
 
-	const productKeywords = [
+	const keywords = [
 		"product",
 		"products",
 		"price",
+		"prices",
 		"cost",
-		"how much",
+		"costs",
 		"buy",
-		"sell",
-		"selling",
 		"available",
 		"availability",
 		"in stock",
@@ -571,6 +772,9 @@ function shouldSearchProducts(
 		"show me",
 		"recommend",
 		"recommendation",
+		"cheapest",
+		"best",
+		"brand",
 		"subwoofer",
 		"subwoofers",
 		"speaker",
@@ -583,28 +787,392 @@ function shouldSearchProducts(
 		"woofers",
 		"sound system",
 		"bass",
+		"under $",
 		"under ",
+		"below $",
 		"below ",
 		"less than",
-		"cheaper than",
-		"or less",
-		"and under",
-		"cheapest",
-		"best",
-		"brand",
-		"sundown",
-		"audio",
-		"labz",
+		"exact names",
+		"names of my products",
+		"what do you have",
+		"what products",
 	];
 
-	return productKeywords.some(
+	return keywords.some(
 		(keyword) =>
 			text.includes(keyword),
 	);
 }
 
-/*
- * Handle LABZ AI chat requests.
+/**
+ * Detect whether the customer wants all products.
+ */
+function wantsAllProducts(
+	message: string,
+): boolean {
+	const text =
+		message.toLowerCase();
+
+	return (
+		text.includes(
+			"exact names of all products",
+		) ||
+		text.includes(
+			"names of all products",
+		) ||
+		text.includes(
+			"all my products",
+		) ||
+		text.includes(
+			"all products",
+		) ||
+		text.includes(
+			"what products do you have",
+		) ||
+		text.includes(
+			"what do you have"
+		)
+	);
+}
+
+/**
+ * Filter products based on the customer's request.
+ */
+function filterProducts(
+	products: ShopifyProduct[],
+	message: string,
+): ShopifyProduct[] {
+	const text =
+		message.toLowerCase();
+
+	let result = [...products];
+
+	/**
+	 * Price filter.
+	 */
+	const maximumPrice =
+		extractMaximumPrice(message);
+
+	if (maximumPrice !== null) {
+		result = result.filter(
+			(product) => {
+				const variants =
+					product.variants?.nodes ??
+					[];
+
+				return variants.some(
+					(variant) => {
+						const price =
+							priceToNumber(
+								variant.price,
+							);
+
+						return (
+							price !== null &&
+							price <=
+								maximumPrice
+						);
+					},
+				);
+			},
+		);
+	}
+
+	/**
+	 * Category/keyword filter.
+	 *
+	 * Only apply this when the customer explicitly
+	 * mentions a product type.
+	 */
+	const categoryKeywords = [
+		"subwoofer",
+		"subwoofers",
+		"speaker",
+		"speakers",
+		"amplifier",
+		"amplifiers",
+		"tweeter",
+		"tweeters",
+		"woofer",
+		"woofers",
+	];
+
+	const category =
+		categoryKeywords.find(
+			(keyword) =>
+				text.includes(keyword),
+		);
+
+	if (category) {
+		const categoryBase =
+			category
+				.replace(/s$/, "");
+
+		const categoryProducts =
+			result.filter(
+				(product) => {
+					const searchable = [
+						product.title,
+						product.vendor ??
+							"",
+						product.description ??
+							"",
+					]
+						.join(" ")
+						.toLowerCase();
+
+					return (
+						searchable.includes(
+							categoryBase,
+						) ||
+						searchable.includes(
+							category,
+						)
+					);
+				},
+			);
+
+		/**
+		 * Only replace the result when Shopify actually
+		 * found category matches.
+		 */
+		if (
+			categoryProducts.length > 0
+		) {
+			result = categoryProducts;
+		}
+	}
+
+	/**
+	 * If the customer explicitly wants cheapest products,
+	 * sort by the lowest variant price.
+	 */
+	if (
+		text.includes("cheapest") ||
+		text.includes("lowest price")
+	) {
+		result.sort(
+			(a, b) => {
+				const aPrices =
+					(a.variants?.nodes ?? [])
+						.map((v) =>
+							priceToNumber(
+								v.price,
+							),
+						)
+						.filter(
+							(v): v is number =>
+								v !== null,
+						);
+
+				const bPrices =
+					(b.variants?.nodes ?? [])
+						.map((v) =>
+							priceToNumber(
+								v.price,
+							),
+						)
+						.filter(
+							(v): v is number =>
+								v !== null,
+						);
+
+				const aMin =
+					aPrices.length
+						? Math.min(
+								...aPrices,
+							)
+						: Infinity;
+
+				const bMin =
+					bPrices.length
+						? Math.min(
+								...bPrices,
+							)
+						: Infinity;
+
+				return aMin - bMin;
+			},
+		);
+	}
+
+	return result;
+}
+
+/**
+ * Build Shopify context for the AI.
+ */
+function buildProductContext(
+	products: ShopifyProduct[],
+	env: Env,
+	message: string,
+): string {
+	const shopifyEnv =
+		getShopifyEnv(env);
+
+	const store =
+		normalizeShopifyStore(
+			shopifyEnv.SHOPIFY_STORE,
+		);
+
+	const requestedCount =
+		extractRequestedCount(message);
+
+	const wantsAll =
+		wantsAllProducts(message);
+
+	const filtered =
+		filterProducts(
+			products,
+			message,
+		);
+
+	let selected: ShopifyProduct[];
+
+	if (wantsAll) {
+		selected = filtered;
+	} else {
+		selected = filtered.slice(
+			0,
+			requestedCount,
+		);
+	}
+
+	if (selected.length === 0) {
+		return `
+SHOPIFY CATALOG RESULT
+
+Shopify was successfully contacted.
+
+No products matched the customer's request.
+
+IMPORTANT:
+- Do not invent products.
+- Do not suggest products that are not in Shopify.
+- Tell the customer that no matching products were found in the current catalog.
+`;
+	}
+
+	const productText =
+		selected
+			.map(
+				(product, index) =>
+					productToTextWithStore(
+						product,
+						index,
+						store,
+					),
+			)
+			.join("\n");
+
+	return `
+SHOPIFY LIVE CATALOG DATA
+
+Shopify was successfully contacted.
+
+Total products retrieved from Shopify:
+${products.length}
+
+Products matching the customer's request:
+${selected.length}
+
+${productText}
+
+STRICT PRODUCT RULES:
+- These are the ONLY SOUND LABZ AUDIO products you may mention.
+- Never invent another product.
+- Never substitute a product from your general knowledge.
+- Never mention a brand/product that is not shown above.
+- Use the exact product names above.
+- Use the exact prices above.
+- Use availability information above.
+- If the customer requested more products than were found, clearly say how many matching products were found.
+`;
+}
+
+/**
+ * Shopify test endpoint.
+ *
+ * Visit:
+ *
+ * /api/shopify-test
+ *
+ * This is useful before testing the AI.
+ */
+async function handleShopifyTest(
+	env: Env,
+	origin: string | null,
+): Promise<Response> {
+	try {
+		const products =
+			await fetchShopifyProducts(
+				env,
+			);
+
+		const shopifyEnv =
+			getShopifyEnv(env);
+
+		const store =
+			normalizeShopifyStore(
+				shopifyEnv.SHOPIFY_STORE,
+			);
+
+		return jsonResponse(
+			{
+				ok: true,
+				store,
+				productCount:
+					products.length,
+				products:
+					products.map(
+						(product) => ({
+							id: product.id,
+							name: product.title,
+							handle:
+								product.handle,
+							vendor:
+								product.vendor,
+							variants:
+								product.variants.nodes.map(
+									(variant) => ({
+										name:
+											variant.title,
+										price:
+											variant.price,
+										available:
+											variant.availableForSale,
+										sku:
+											variant.sku,
+									}),
+								),
+						}),
+					),
+			},
+			200,
+			origin,
+		);
+	} catch (error) {
+		console.error(
+			"SHOPIFY TEST ERROR:",
+			error,
+		);
+
+		return jsonResponse(
+			{
+				ok: false,
+				error:
+					error instanceof Error
+						? error.message
+						: "Unknown Shopify error",
+			},
+			500,
+			origin,
+		);
+	}
+}
+
+/**
+ * Handle LABZ AI chat.
  */
 async function handleChatRequest(
 	request: Request,
@@ -618,13 +1186,14 @@ async function handleChatRequest(
 			};
 
 		const incomingMessages =
-			Array.isArray(body.messages)
+			Array.isArray(
+				body.messages,
+			)
 				? body.messages
 				: [];
 
-		/*
-		 * Only allow user and assistant messages
-		 * from the browser.
+		/**
+		 * Only allow user and assistant messages.
 		 *
 		 * Browser cannot override our system prompt.
 		 */
@@ -635,20 +1204,17 @@ async function handleChatRequest(
 						message &&
 						message.role !==
 							"system" &&
-						(message.role ===
-							"user" ||
+						(
 							message.role ===
-								"assistant") &&
+								"user" ||
+							message.role ===
+								"assistant"
+						) &&
 						typeof message.content ===
 							"string",
 				)
 				.slice(-20);
 
-		let productContext = "";
-
-		/*
-		 * Find the latest customer message.
-		 */
 		const latestUserMessage =
 			[...conversation]
 				.reverse()
@@ -658,119 +1224,93 @@ async function handleChatRequest(
 						"user",
 				);
 
-		/*
-		 * Search Shopify when appropriate.
+		let productContext = "";
+
+		/**
+		 * If the customer asks about products,
+		 * Shopify MUST be contacted.
 		 */
-		if (
-			latestUserMessage &&
-			shouldSearchProducts(
-				latestUserMessage.content,
-			)
-		) {
-			try {
-				const customerQuestion =
-					latestUserMessage.content;
+		if (latestUserMessage) {
+			const userText =
+				latestUserMessage.content;
 
-				/*
-				 * Detect price requirement.
-				 *
-				 * Example:
-				 *
-				 * "show me subwoofers under $100"
-				 *
-				 * maxPrice = 100
-				 */
-				const maxPrice =
-					extractMaxPrice(
-						customerQuestion,
+			if (
+				shouldSearchProducts(
+					userText,
+				)
+			) {
+				try {
+					const products =
+						await fetchShopifyProducts(
+							env,
+						);
+
+					productContext =
+						buildProductContext(
+							products,
+							env,
+							userText,
+						);
+				} catch (error) {
+					console.error(
+						"SHOPIFY ERROR:",
+						error instanceof Error
+							? error.message
+							: error,
 					);
 
-				const results =
-					await searchShopifyProducts(
-						customerQuestion,
-						env,
-						maxPrice,
-					);
+					/**
+					 * VERY IMPORTANT:
+					 *
+					 * Do NOT give the AI generic product
+					 * information when Shopify fails.
+					 */
+					productContext = `
+SHOPIFY CATALOG ERROR
 
-				productContext = `
+The Shopify catalog could not be accessed.
 
-SHOPIFY LIVE PRODUCT INFORMATION
-
-The following information was retrieved directly from the current Shopify catalog.
-
-CUSTOMER REQUEST:
-${customerQuestion}
-
-${
-	maxPrice !== null
-		? `MAXIMUM PRICE REQUESTED: $${maxPrice}`
-		: ""
-}
-
-${results}
-
-IMPORTANT SHOPIFY RULES:
-- Use the Shopify information above as the source of truth.
-- Do not invent products.
-- Do not invent prices.
-- Do not invent availability.
-- Only recommend products matching the customer's request.
-- If a maximum price was requested, do not recommend products above that price.
-- If no matching products were found, clearly tell the customer.
-- Give product names and prices when appropriate.
-- Give product URLs when appropriate.
+CRITICAL:
+- Do NOT list products.
+- Do NOT invent product names.
+- Do NOT invent prices.
+- Do NOT claim that SOUND LABZ AUDIO sells any product.
+- Tell the customer that the current store catalog is temporarily unavailable.
 `;
-			} catch (error) {
-    console.error(
-        "SHOPIFY ERROR:",
-        error instanceof Error
-            ? error.message
-            : String(error),
-    );
-
-    productContext = `
-SHOPIFY ERROR:
-The Shopify product search failed.
-
-Do not invent products or prices.
-`;
-}
+				}
+			}
 		}
 
-		/*
-		 * Build final AI messages.
-		 */
-		const messages: ChatMessage[] = [
-			{
-				role: "system",
-				content:
-					SYSTEM_PROMPT +
-					productContext,
-			},
+		const messages: ChatMessage[] =
+			[
+				{
+					role: "system",
+					content:
+						SYSTEM_PROMPT +
+						productContext,
+				},
+				...conversation,
+			];
 
-			...conversation,
-		];
-
-		/*
-		 * We deliberately avoid requiring a separate
-		 * AiTextGenerationInput type here.
-		 *
-		 * This makes the code less dependent on which
-		 * Cloudflare generated types are installed.
-		 */
 		const inputs = {
 			messages,
 			max_tokens: 512,
 			stream: true,
 		};
 
-		/*
-		 * Run Cloudflare Workers AI.
+		/**
+		 * Use the Cloudflare Workers AI binding.
+		 *
+		 * The cast avoids TypeScript version differences
+		 * between Workers AI type definitions.
 		 */
+		const aiBinding =
+			env.AI as any;
+
 		const stream =
-			await env.AI.run(
-				MODEL_ID as any,
-				inputs as any,
+			await aiBinding.run(
+				MODEL_ID,
+				inputs,
 			);
 
 		const headers =
@@ -792,7 +1332,7 @@ Do not invent products or prices.
 		);
 
 		return new Response(
-			stream as BodyInit,
+			stream,
 			{
 				status: 200,
 				headers,
@@ -800,7 +1340,7 @@ Do not invent products or prices.
 		);
 	} catch (error) {
 		console.error(
-			"LABZ AI error:",
+			"LABZ AI ERROR:",
 			error,
 		);
 
@@ -815,10 +1355,8 @@ Do not invent products or prices.
 	}
 }
 
-/*
- * CLOUDFLARE ES MODULE WORKER
- *
- * This is required for the Workers AI binding.
+/**
+ * Cloudflare Worker.
  */
 export default {
 	async fetch(
@@ -831,7 +1369,7 @@ export default {
 				"Origin",
 			);
 
-		/*
+		/**
 		 * CORS preflight.
 		 */
 		if (
@@ -853,30 +1391,13 @@ export default {
 		const url =
 			new URL(request.url);
 
-		/*
-		 * LABZ AI chat endpoint.
-		 */
-		if (
-			url.pathname ===
-				"/api/chat" &&
-			request.method ===
-				"POST"
-		) {
-			return handleChatRequest(
-				request,
-				env,
-				origin,
-			);
-		}
-
-		/*
+		/**
 		 * Health check.
 		 */
 		if (
 			url.pathname ===
 				"/api/health" &&
-			request.method ===
-				"GET"
+			request.method === "GET"
 		) {
 			return jsonResponse(
 				{
@@ -889,19 +1410,67 @@ export default {
 			);
 		}
 
-		/*
-		 * Serve website files from
-		 * the public directory.
+		/**
+		 * Shopify direct test.
 		 */
-     return new Response(
-            "LABZ AI is running.",
-            {
-                status: 200,
-                headers:
-                    corsHeaders(
-                        origin,
-                    ),
-            },
-        );
-    },
+		if (
+			url.pathname ===
+				"/api/shopify-test" &&
+			request.method === "GET"
+		) {
+			return handleShopifyTest(
+				env,
+				origin,
+			);
+		}
+
+		/**
+		 * AI chat.
+		 */
+		if (
+			url.pathname ===
+				"/api/chat" &&
+			request.method === "POST"
+		) {
+			return handleChatRequest(
+				request,
+				env,
+				origin,
+			);
+		}
+
+		/**
+		 * Serve public assets if the ASSETS binding exists.
+		 *
+		 * This also prevents:
+		 *
+		 * Cannot read properties of undefined
+		 * (reading 'fetch')
+		 *
+		 * when ASSETS is unavailable.
+		 */
+		if (
+			env.ASSETS &&
+			typeof (env.ASSETS as any).fetch ===
+				"function"
+		) {
+			return env.ASSETS.fetch(
+				request,
+			);
+		}
+
+		/**
+		 * No asset binding.
+		 */
+		return new Response(
+			"LABZ AI Worker is running.",
+			{
+				status: 200,
+				headers:
+					corsHeaders(
+						origin,
+					),
+			},
+		);
+	},
 };
