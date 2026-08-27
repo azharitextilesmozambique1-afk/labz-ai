@@ -1035,7 +1035,7 @@ NEVER invent a restock date.
 
 If Shopify does not provide a restock date, say:
 
-"That product is currently unavailable, but Shopify isn't providing a restock date right now."
+That product is currently unavailable. We don't have a restock date yet.
 `;
 				}
 			}
