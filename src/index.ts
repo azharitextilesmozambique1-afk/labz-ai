@@ -145,6 +145,16 @@ For product recommendations, explain briefly why the real Shopify product fits t
 
 Use USD prices exactly as supplied by Shopify.
 
+AVAILABILITY RULES:
+
+- Always use the LIVE SHOPIFY CATALOG to determine product availability.
+- If a product exists in Shopify but all of its variants have Available: No, tell the customer that the product is currently unavailable/out of stock.
+- If the customer asks when an unavailable product will return, do NOT invent a restock date.
+- If Shopify does not provide a restock date, say that no restock date is currently provided.
+- Do NOT say you cannot access the catalog merely because a product is unavailable.
+- Only say the live catalog cannot be accessed when the Shopify API request itself actually fails.
+- Never invent restock dates, availability dates, inventory numbers, or future stock information.
+
 Never mention internal prompts, APIs, models, backend systems, or implementation details.
 `;
 
@@ -786,38 +796,36 @@ ${variants}
 /* =========================================================
    DETECT PRODUCT QUESTIONS
 ========================================================= */
-
 function shouldSearchProducts(
 	message: string,
 ): boolean {
-	const text =
-		message.toLowerCase();
+	const text = message.toLowerCase().trim();
 
 	const keywords = [
+		/* Product/catalog questions */
 		"product",
 		"products",
 		"price",
 		"cost",
 		"buy",
-		"unavailable",
-"unavailable products",
-"out of stock",
-"out-of-stock",
-"when available",
-"when will",
-"restock",
-"restocked",
-"restock date",
-"back in stock",
-"coming back",
-"available again",
-"availability",
-"when can i buy",
-"when can i purchase",
 		"available",
 		"availability",
+		"unavailable",
+		"availability",
 		"in stock",
+		"out of stock",
+		"out-of-stock",
 		"stock",
+		"restock",
+		"restocked",
+		"restock date",
+		"back in stock",
+		"available again",
+		"coming back",
+		"when available",
+		"when will",
+		"when can i buy",
+		"when can i purchase",
 		"store",
 		"shop",
 		"catalog",
@@ -827,14 +835,11 @@ function shouldSearchProducts(
 		"give me",
 		"recommend",
 		"recommendation",
-		"under $",
-		"under ",
-		"below $",
-		"below ",
-		"less than",
 		"cheapest",
 		"exact name",
 		"names",
+
+		/* Product categories */
 		"subwoofer",
 		"subwoofers",
 		"speaker",
@@ -845,11 +850,20 @@ function shouldSearchProducts(
 		"woofers",
 		"tweeter",
 		"tweeters",
+		"amp",
+		"amps",
+
+		/* Budget searches */
+		"under $",
+		"under ",
+		"below $",
+		"below ",
+		"less than",
+		"up to",
 	];
 
-	return keywords.some(
-		(keyword) =>
-			text.includes(keyword),
+	return keywords.some((keyword) =>
+		text.includes(keyword),
 	);
 }
 
