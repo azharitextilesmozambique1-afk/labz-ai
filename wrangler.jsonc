@@ -6,8 +6,7 @@
 	"$schema": "node_modules/wrangler/config-schema.json",
 	"name": "labz-ai",
 	"main": "src/index.ts",
-	"compatibility_date": "2025-10-08",
-	"compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+	"compatibility_date": "2026-08-27",
 	"assets": {
 		"binding": "ASSETS",
 		"directory": "./public"
