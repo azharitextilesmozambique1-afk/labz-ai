@@ -721,20 +721,20 @@ IMPORTANT SHOPIFY RULES:
 - Give product URLs when appropriate.
 `;
 			} catch (error) {
-				console.error(
-					"Shopify search failed:",
-					error,
-				);
+    console.error(
+        "SHOPIFY ERROR:",
+        error instanceof Error
+            ? error.message
+            : String(error),
+    );
 
-				productContext = `
+    productContext = `
+SHOPIFY ERROR:
+The Shopify product search failed.
 
-SHOPIFY PRODUCT SEARCH
-
-Shopify product information could not be retrieved right now.
-
-Do not invent product availability or pricing.
+Do not invent products or prices.
 `;
-			}
+}
 		}
 
 		/*
