@@ -192,7 +192,7 @@ async function getShopifyAccessToken(
 	}
 
 	const response = await fetch(
-		"https://shopify.com/admin/oauth/access_token",
+    `https://${envWithShopify.SHOPIFY_STORE}/admin/oauth/access_token`,
 		{
 			method: "POST",
 
