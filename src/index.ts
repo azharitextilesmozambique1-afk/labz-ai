@@ -1120,29 +1120,6 @@ export default {
 			request.headers.get(
 				"Origin",
 			);
-		// 🌐 GEOLOCATION & MESSAGE TRACKER LOOP
-		if (request.method === "POST" && new URL(request.url).pathname.includes("/chat")) {
-			try {
-				const clonedRequest = request.clone();
-				const body = await clonedRequest.json() as any;
-
-				const clientIp = request.headers.get("cf-connecting-ip") || "Unknown";
-				const country = request.cf?.country || "Unknown";
-				const city = request.cf?.city || "Unknown";
-				
-				const messageContent = JSON.stringify(body);
-
-
-				if (env.DB) {
-					await env.DB.prepare(
-						`INSERT INTO chat_logs (timestamp, client_ip, country, city, message_content) 
-						 VALUES (datetime('now'), ?, ?, ?, ?)`
-					).bind(clientIp, country, city, messageContent).run();
-				}
-			} catch (dbError) {
-				console.error("D1 Log Entry Bypass Handled:", dbError);
-			}
-		}
 
 		/* CORS */
 
