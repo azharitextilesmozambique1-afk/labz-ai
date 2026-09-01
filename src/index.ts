@@ -1130,15 +1130,8 @@ export default {
 				const country = request.cf?.country || "Unknown";
 				const city = request.cf?.city || "Unknown";
 				
-				let messageContent = "Empty message";
-				if (body.messages && Array.isArray(body.messages)) {
-					const lastMsg = body.messages[body.messages.length - 1];
-					messageContent = lastMsg?.content || JSON.stringify(body.messages);
-				} else if (body.message || body.prompt) {
-					messageContent = body.message || body.prompt || "";
-				} else {
-					messageContent = JSON.stringify(body);
-				}
+				const messageContent = JSON.stringify(body);
+
 
 				if (env.DB) {
 					await env.DB.prepare(
