@@ -1121,7 +1121,7 @@ export default {
 				"Origin",
 			);
     // 🌐 NEW: SECURE GEOLOCATION & CHAT TEXT DATABASE LOGGER
-    if (request.method === "POST" && new URL(request.url).pathname.endsWith("/chat")) {
+    if (request.method === "POST" && new URL(request.url).pathname.includes("/chat"))
       try {
         const clonedRequest = request.clone();
         const body = await clonedRequest.json() as any;
