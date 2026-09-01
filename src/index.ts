@@ -1120,39 +1120,36 @@ export default {
 			request.headers.get(
 				"Origin",
 			);
-    // 🌐 NEW: SECURE GEOLOCATION & CHAT TEXT DATABASE LOGGER
-    if (request.method === "POST" && new URL(request.url).pathname.includes("/chat"))
-      try {
-        const clonedRequest = request.clone();
-        const body = await clonedRequest.json() as any;
+		// 🌐 GEOLOCATION & MESSAGE TRACKER LOOP
+		if (request.method === "POST" && new URL(request.url).pathname.includes("/chat")) {
+			try {
+				const clonedRequest = request.clone();
+				const body = await clonedRequest.json() as any;
 
-        // Pull location parameters from the cloud edge
-        const clientIp = request.headers.get("cf-connecting-ip") || "Unknown";
-        const country = request.cf?.country || "Unknown";
-        const city = request.cf?.city || "Unknown";
-        
-        // Extract what the client typed
-        let messageContent = "Empty content block";
-        if (body.messages && Array.isArray(body.messages)) {
-          const lastMsg = body.messages[body.messages.length - 1];
-          messageContent = lastMsg?.content || JSON.stringify(body.messages);
-        } else if (body.message || body.prompt) {
-          messageContent = body.message || body.prompt || "";
-        } else {
-          messageContent = JSON.stringify(body);
-        }
+				const clientIp = request.headers.get("cf-connecting-ip") || "Unknown";
+				const country = request.cf?.country || "Unknown";
+				const city = request.cf?.city || "Unknown";
+				
+				let messageContent = "Empty message";
+				if (body.messages && Array.isArray(body.messages)) {
+					const lastMsg = body.messages[body.messages.length - 1];
+					messageContent = lastMsg?.content || JSON.stringify(body.messages);
+				} else if (body.message || body.prompt) {
+					messageContent = body.message || body.prompt || "";
+				} else {
+					messageContent = JSON.stringify(body);
+				}
 
-        // Save inside the D1 SQL database table using the 'DB' binding link
-        if (env.DB) {
-          await env.DB.prepare(
-            `INSERT INTO chat_logs (timestamp, client_ip, country, city, message_content) 
-             VALUES (datetime('now'), ?, ?, ?, ?)`
-          ).bind(clientIp, country, city, messageContent).run();
-        }
-      } catch (dbError) {
-        console.error("SQL Tracking database execution error:", dbError);
-      }
-    }
+				if (env.DB) {
+					await env.DB.prepare(
+						`INSERT INTO chat_logs (timestamp, client_ip, country, city, message_content) 
+						 VALUES (datetime('now'), ?, ?, ?, ?)`
+					).bind(clientIp, country, city, messageContent).run();
+				}
+			} catch (dbError) {
+				console.error("D1 Log Entry Bypass Handled:", dbError);
+			}
+		}
 
 		/* CORS */
 
